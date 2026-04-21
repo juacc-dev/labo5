@@ -22,30 +22,10 @@ def get_ch(dfs, ch):
     return channel
 
 
-def roll(array, shift):
-    """
-    Like numpy.roll but without wrapping
-    """
-
-    # Branchless logic ;)
-    left = shift * (shift > 0)
-    right = shift * (shift < 0)
-
-    # Roll and remove wrapped border
-    array_shift = np.roll(array, shift)[left:right]
-
-    return array_shift
-
-
 def compact(y, y0, n):
     core_size = y.size - 2 * n
 
-    if y0.size < core_size:
-        logger.error(f"Reference array too small: {y0.size} < {core_size}")
-
-    if y0.size == y.size:
-        return y0[n:-n]
-    else:
+    if y0.size == core_size:
         return y0
 
     if y0.size > core_size:
@@ -55,9 +35,9 @@ def compact(y, y0, n):
         right = -math.ceil(pad)
 
         # Remove up to n elements from each side
-        y0 = y0[left:right]
+        return y0[left:right]
 
-        return y0
+    logger.error(f"Reference array too small: {y0.size} < {core_size}")
 
 def align(y, y0, n):
     # Make sure y0 has the right size
@@ -96,13 +76,13 @@ def merge(ys, y0, n):
         y0 = compact(y, y0, n)
 
     y = np.mean(y_shifted, axis=0)
-    shift = np.mean(shifts)
+    shift = np.max(shifts)
     distance = np.mean(distances)
 
     return y, distance, shift
 
 
-def compare_devs(path, n=50):
+def compare_devs(path):
     dfs = [pd.read_csv(file) for file in path.glob("*.csv")]
 
     # tiempo = get_ch(dfs, "Tiempo") * SEC_TO_MICROSEC
@@ -112,7 +92,8 @@ def compare_devs(path, n=50):
     y1 = np.mean(ch1, axis=0)
     # y02 = np.mean(ch2, axis=0)
 
-    N = 10
+    n = 120
+    N = 20
 
     distances = []
     shifts = []
@@ -124,6 +105,10 @@ def compare_devs(path, n=50):
 
         distances.append(dist)
         shifts.append(shift)
+
+        if len(distances) > 1:
+            if distances[-1] == distances[-2]:
+                break
 
     for y in ch1:
         ax[0].plot(y[n:-n], color="black", alpha=1/50)
