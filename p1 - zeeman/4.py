@@ -5,6 +5,7 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import math
 
 pylabo.logs.opts.level_console = logging.INFO
 pylabo.defaults()
@@ -12,97 +13,132 @@ logger = logging.getLogger("main2")
 
 data_path = Path("./data/14-4/primer bache")
 
-pattern_files = re.compile(r"(?P<number>\d{1,2})\.csv")
+SEC_TO_MICROSEC = 1_000_000
+
 
 def get_ch(dfs, ch):
-    channel = np.zeros((
-        len(dfs.keys()),
-        dfs[0].shape[0]
-    ))
-
-    for n, df in dfs.items():
-        channel[n] = df[ch].to_numpy()
+    channel = np.array([df[ch].to_numpy() for df in dfs])
 
     return channel
 
-def get_dfs(path):
-    dfs = {}
-    for file in path.glob("*.csv"):
-        x = pattern_files.search(file.name)
-        n = int(x.group("number"))
 
-        dfs[n] = pd.read_csv(file)
+def roll(array, shift):
+    """
+    Like numpy.roll but without wrapping
+    """
 
-    return dfs
+    # Branchless logic ;)
+    left = shift * (shift > 0)
+    right = shift * (shift < 0)
+
+    # Roll and remove wrapped border
+    array_shift = np.roll(array, shift)[left:right]
+
+    return array_shift
 
 
-def fit_horizontal(x, y, y0, n):
-    y0_test = [
-        np.roll(y0, i)[n:-n]
-        for i in range(-n, n)
-    ]
+def compact(y, y0, n):
+    core_size = y.size - 2 * n
 
-    y_small = y[n:-n]
+    if y0.size < core_size:
+        logger.error(f"Reference array too small: {y0.size} < {core_size}")
 
-    distances = []
-    for ref in y0_test:
-        s = np.sqrt(np.sum((y_small - ref) ** 2))
+    if y0.size == y.size:
+        return y0[n:-n]
+    else:
+        return y0
 
-        distances.append(s)
+    if y0.size > core_size:
+        pad = (y0.size - core_size) / 2
+
+        left = math.floor(pad)
+        right = -math.ceil(pad)
+
+        # Remove up to n elements from each side
+        y0 = y0[left:right]
+
+        return y0
+
+def align(y, y0, n):
+    # Make sure y0 has the right size
+    y0 = compact(y, y0, n)
+
+    distances = np.zeros(2 * n)
+
+    for i in range(2 * n):
+        y_shift = np.roll(y, -i)[:-2*n]
+
+        # Distanced defined by the inner product
+        distances[i] = np.linalg.norm(y_shift - y0)
 
     i_min =  np.argmin(distances)
-    # Negative sign implicit
-    deviation = n - i_min
 
-    return deviation, distances[i_min]
+    shift = n - i_min
+    distance = distances[i_min]
+
+    return shift, distance
+
+
+def merge(ys, y0, n):
+    y_shifted = []
+    distances = []
+    shifts = []
+
+    for y in ys:
+        shift, min_dist = align(y, y0, n=n)
+
+        y_shift = np.roll(y, shift)[n:-n]
+
+        y_shifted.append(y_shift)
+        distances.append(min_dist)
+        shifts.append(shift)
+
+        y0 = compact(y, y0, n)
+
+    y = np.mean(y_shifted, axis=0)
+    shift = np.mean(shifts)
+    distance = np.mean(distances)
+
+    return y, distance, shift
 
 
 def compare_devs(path, n=50):
-    dfs = get_dfs(path)
+    dfs = [pd.read_csv(file) for file in path.glob("*.csv")]
 
-    tiempo = get_ch(dfs, "Tiempo") * 1000
+    # tiempo = get_ch(dfs, "Tiempo") * SEC_TO_MICROSEC
     ch1 = get_ch(dfs, "Canal 1")
-    ch2 = get_ch(dfs, "Canal 2")
+    # ch2 = get_ch(dfs, "Canal 2")
 
-    y01 = np.mean(ch1, axis=0)
-    y02 = np.mean(ch2, axis=0)
+    y1 = np.mean(ch1, axis=0)
+    # y02 = np.mean(ch2, axis=0)
 
+    N = 10
 
-    dist1 = []
-    dist2 = []
-    dev_rel = []
+    distances = []
+    shifts = []
 
-    for t, data1, data2 in zip(tiempo, ch1, ch2):
-        dv1, s1 = fit_horizontal(t, data1, y01, n=n)
-        dv2, s2 = fit_horizontal(t, data2, y02, n=n)
+    fig, ax = plt.subplots(3, 1)
 
-        dt = 1000 * (t[1] - t[0])
-        dev_rel.append((dv2 - dv1) * dt)
+    for i in range(N):
+        y1, dist, shift = merge(ch1, y1, n)
 
-        dist1.append(s1)
-        dist2.append(s2)
+        distances.append(dist)
+        shifts.append(shift)
 
-    return dist1, dist2, dev_rel
+    for y in ch1:
+        ax[0].plot(y[n:-n], color="black", alpha=1/50)
+
+    ax[0].set(title=path.name)
+    ax[0].plot(y1, color="green", label="Sintetizado")
+    ax[0].legend()
+    ax[1].plot(distances)
+    ax[2].plot(shifts)
+    ax[1].set(ylabel="Dist")
+    ax[2].set(ylabel="shift")
+    plt.show()
+
+    return y1, distances, shifts
 
 
 for path in data_path.glob("*zeema*/"):
-    dist1, dist2, dev_rel = compare_devs(path)
-
-    fig, ax = plt.subplots(2, 1, sharex=True)
-
-    ax[0].plot(dist1, label="Canal 1")
-    ax[0].plot(dist2, label="Canal 2")
-
-    ax[1].plot(dev_rel)
-
-    ax[0].set(
-        ylabel="Distancia a la referencia",
-        title=f"{path.name}",
-    )
-    ax[1].set(
-        xlabel="Número de archivo",
-        ylabel=r"Desviación entre canales [$\mu$s]",
-    )
-    ax[0].legend()
-    plt.tight_layout()
-    plt.show()
+    y, dist, shift = compare_devs(path)

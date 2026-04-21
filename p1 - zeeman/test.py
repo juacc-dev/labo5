@@ -1,7 +1,6 @@
 import numpy as np
 
+y = np.array([2,3,4])
 x = np.array([1,2,3,4,5])
-
-n = 25
-y = [i for i in range(-n, n)]
-print(len(y))
+print(y)
+print(np.roll(x,-1))
