@@ -1,3 +1,6 @@
 .venv/
 */data/*
 */pylabo
+__pycache__/
+*.log
+*.zip
