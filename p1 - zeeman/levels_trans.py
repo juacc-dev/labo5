@@ -36,7 +36,7 @@ def get_freq(isot: str, transition: str):
 for isot in [R85, R87]:
     print(f"{isot} = " + "{")
 
-    for transition in ["A2", "B1"]:
+    for transition in ["A1", "A2", "B1", "B2"]:
         freq = get_freq(isot, transition)
 
         print(f"  \"{transition}\": {freq:.2f},")
